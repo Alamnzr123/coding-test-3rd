@@ -16,6 +16,8 @@ from app.schemas.document import (
 )
 from app.services.document_processor import DocumentProcessor
 from app.core.config import settings
+from app.db.session import SessionLocal
+import asyncio
 
 router = APIRouter()
 
@@ -66,13 +68,21 @@ async def upload_document(
     db.commit()
     db.refresh(document)
     
-    # Start background processing
-    background_tasks.add_task(
-        process_document_task,
-        document.id,
-        file_path,
-        fund_id or 1  # Default fund_id if not provided
-    )
+    # Prefer Celery if available, otherwise use BackgroundTasks
+    try:
+        # import locally to avoid mandatory celery dependency
+        from backend.app.tasks.parse_tasks import parse_document  # type: ignore
+
+        # enqueue Celery task
+        parse_document.delay(str(file_path), document.id)
+    except Exception:
+        # fallback to in-process background task
+        background_tasks.add_task(
+            process_document_task,
+            document.id,
+            file_path,
+            fund_id or 1  # Default fund_id if not provided
+        )
     
     return DocumentUploadResponse(
         document_id=document.id,
@@ -83,34 +93,47 @@ async def upload_document(
 
 
 async def process_document_task(document_id: int, file_path: str, fund_id: int):
-    """Background task to process document"""
-    from app.db.session import SessionLocal
-    
+    """Background task to process document (used when Celery not available)"""
     db = SessionLocal()
-    
+    doc = None
     try:
-        # Update status to processing
-        document = db.query(Document).filter(Document.id == document_id).first()
-        document.parsing_status = "processing"
-        db.commit()
-        
-        # Process document
+        if document_id is not None:
+            doc = db.query(Document).filter(Document.id == document_id).first()
+            if doc:
+                try:
+                    doc.parsing_status = "processing"
+                    db.commit()
+                except Exception:
+                    db.rollback()
+
         processor = DocumentProcessor()
-        result = await processor.process_document(file_path, document_id, fund_id)
-        
-        # Update status
-        document.parsing_status = result["status"]
-        if result["status"] == "failed":
-            document.error_message = result.get("error")
-        db.commit()
-        
+        # run the async processor
+        res = await processor.process_document(file_path, document_id or 0, fund_id)
+
+        if document_id is not None and doc:
+            try:
+                doc.parsing_status = "done"
+                parsed_path = res.get("parsed_json") or res.get("parsed_json_path")
+                if parsed_path and hasattr(doc, "parsed_json"):
+                    setattr(doc, "parsed_json", parsed_path)
+                db.commit()
+            except Exception:
+                db.rollback()
     except Exception as e:
-        document = db.query(Document).filter(Document.id == document_id).first()
-        document.parsing_status = "failed"
-        document.error_message = str(e)
-        db.commit()
+        logger.exception("Background processing failed: %s", e)
+        if document_id is not None and doc:
+            try:
+                doc.parsing_status = "error"
+                if hasattr(doc, "error_message"):
+                    setattr(doc, "error_message", str(e))
+                db.commit()
+            except Exception:
+                db.rollback()
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 @router.get("/{document_id}/status", response_model=DocumentStatus)

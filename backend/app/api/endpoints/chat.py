@@ -1,11 +1,15 @@
 """
 Chat API endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import uuid
 from datetime import datetime
+import logging
+import os
+import asyncio
+
 from app.db.session import get_db
 from app.schemas.chat import (
     ChatQueryRequest,
@@ -17,6 +21,8 @@ from app.schemas.chat import (
 from app.services.query_engine import QueryEngine
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+qe = QueryEngine()
 
 # In-memory conversation storage (replace with Redis/DB in production)
 conversations: Dict[str, Dict[str, Any]] = {}
@@ -35,13 +41,19 @@ async def process_chat_query(
         conversation_history = conversations[request.conversation_id]["messages"]
     
     # Process query
-    query_engine = QueryEngine(db)
-    response = await query_engine.process_query(
-        query=request.query,
-        fund_id=request.fund_id,
-        conversation_history=conversation_history
-    )
-    
+    try:
+        query_engine = QueryEngine()
+        # attach DB session to the engine instance (safe whether __init__ accepts db or not)
+        query_engine.db = db
+        response = await query_engine.process_query(
+            query=request.query,
+            fund_id=request.fund_id,
+            conversation_history=conversation_history
+        )
+    except Exception as e:
+        logger.exception("Chat query processing failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
     # Update conversation history
     if request.conversation_id:
         if request.conversation_id not in conversations:

@@ -7,7 +7,11 @@ TODO: Implement vector storage using pgvector
 - Implement similarity search using pgvector operators
 - Handle metadata filtering
 """
-from typing import List, Dict, Any, Optional
+import json
+import os
+from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
+
 import numpy as np
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -212,3 +216,85 @@ class VectorStore:
         except Exception as e:
             print(f"Error clearing vector store: {e}")
             self.db.rollback()
+
+
+# FAISS-backed simple vector store with metadata
+class FaissVectorStore:
+    def __init__(self, index_path: str | None = None, dim: int = 384):
+        self.index_path = Path(index_path or os.getenv("FAISS_INDEX_PATH", "/app/faiss_index"))
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        self.meta_path = self.index_path.with_suffix(".meta.json")
+        self.dim = dim
+        self._index = None
+        self._metadict: Dict[str, Dict] = {}
+        self._load()
+
+    def _load(self):
+        try:
+            import faiss
+        except Exception:
+            self._index = None
+            return
+        if self.index_path.exists():
+            self._index = faiss.read_index(str(self.index_path))
+            if self.meta_path.exists():
+                with open(self.meta_path, "r", encoding="utf-8") as fh:
+                    self._metadict = json.load(fh)
+        else:
+            self._index = faiss.IndexFlatIP(self.dim)
+
+    def _save(self):
+        if self._index is None:
+            return
+        import faiss
+
+        faiss.write_index(self._index, str(self.index_path))
+        with open(self.meta_path, "w", encoding="utf-8") as fh:
+            json.dump(self._metadict, fh, ensure_ascii=False, indent=2)
+
+    def upsert(self, ids: List[str], embeddings: List[List[float]], metas: List[Dict]):
+        """
+        ids: list of string ids
+        embeddings: list of vectors (matching dim)
+        metas: list of metadata dicts
+        """
+        try:
+            import faiss
+        except Exception as e:
+            raise RuntimeError("faiss not available; install faiss-cpu or use pgvector") from e
+
+        vecs = np.array(embeddings).astype("float32")
+        if vecs.shape[1] != self.dim:
+            # allow adaptable dim for first time
+            if self._index is None:
+                self.dim = vecs.shape[1]
+                self._index = faiss.IndexFlatIP(self.dim)
+            else:
+                raise ValueError("Embedding dim mismatch")
+
+        self._index.add(vecs)
+        # store metadata keyed by incremental numeric idx (simple approach)
+        start_idx = len(self._metadict)
+        for i, _id in enumerate(ids):
+            self._metadict[str(start_idx + i)] = {"id": _id, "meta": metas[i]}
+        self._save()
+
+    def search_by_vector(self, query_embedding: List[float], top_k: int = 5) -> List[Tuple[Dict, float]]:
+        try:
+            import faiss
+        except Exception:
+            raise RuntimeError("faiss not available")
+        if self._index is None:
+            return []
+        q = np.array([query_embedding]).astype("float32")
+        D, I = self._index.search(q, top_k)
+        results = []
+        for score, idx in zip(D[0], I[0]):
+            if idx < 0:
+                continue
+            meta = self._metadict.get(str(int(idx)), {})
+            results.append((meta, float(score)))
+        return results
+
+    def close(self):
+        self._save()
