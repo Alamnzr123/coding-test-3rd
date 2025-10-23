@@ -69,24 +69,24 @@ This repository contains a **project scaffold** to help you get started quickly:
 The following **core functionalities are NOT implemented** and need to be built by you:
 
 #### 1. Document Processing Pipeline (Phase 2) - **CRITICAL**
-- [ ] PDF parsing with pdfplumber (integrate and test)
-- [ ] Table detection and extraction logic
-- [ ] Intelligent table classification (capital calls vs distributions vs adjustments)
-- [ ] Data validation and cleaning
-- [ ] Error handling for malformed PDFs
-- [ ] Background task processing (Celery integration)
+- [x] PDF parsing with pdfplumber (integrate and test)
+- [x] Table detection and extraction logic
+- [x] Intelligent table classification (capital calls vs distributions vs adjustments)
+- [x] Data validation and cleaning
+- [x] Error handling for malformed PDFs
+- [x] Background task processing (Celery integration)
 
 **Files to implement:**
 - `backend/app/services/document_processor.py` (skeleton provided)
 - `backend/app/services/table_parser.py` (needs implementation)
 
 #### 2. Vector Store & RAG System (Phase 3) - **CRITICAL**
-- [ ] Text chunking strategy implementation
-- [ ] embedding generation
-- [ ] FAISS index creation and management
-- [ ] Semantic search implementation
-- [ ] Context retrieval for LLM
-- [ ] Prompt engineering for accurate responses
+- [x] Text chunking strategy implementation
+- [x] embedding generation
+- [x] FAISS index creation and management
+- [x] Semantic search implementation
+- [x] Context retrieval for LLM
+- [x] Prompt engineering for accurate responses
 
 **Files to implement:**
 - `backend/app/services/vector_store.py` (pgvector implementation with TODOs)
@@ -95,12 +95,12 @@ The following **core functionalities are NOT implemented** and need to be built 
 **Note**: This project uses **pgvector** instead of FAISS. pgvector is a PostgreSQL extension that stores vectors directly in your database, eliminating the need for a separate vector database.
 
 #### 3. Query Engine & Intent Classification (Phase 3-4) - **CRITICAL**
-- [ ] Intent classifier (calculation vs definition vs retrieval)
-- [ ] Query router logic
-- [ ] LLM integration 
-- [ ] Response formatting
-- [ ] Source citation
-- [ ] Conversation context management
+- [x] Intent classifier (calculation vs definition vs retrieval)
+- [x] Query router logic
+- [x] LLM integration 
+- [x] Response formatting
+- [x] Source citation
+- [x] Conversation context management
 
 **Files to implement:**
 - `backend/app/services/query_engine.py` (needs implementation)
